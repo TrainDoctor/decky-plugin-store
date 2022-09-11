@@ -1,4 +1,4 @@
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.sql import select, insert, delete
 from sqlalchemy.exc import NoResultFound
@@ -26,8 +26,7 @@ class Database:
         def __init__(self, id):
             self.id = id
 
-    async def _get_or_insert(self, t, **kwargs):
-        session = self.maker()
+    async def _get_or_insert(self, session, t, **kwargs):
         statement = select(t)
         for i,v in kwargs.items():
             statement = statement.where(getattr(t, i) == v)
@@ -35,11 +34,10 @@ class Database:
         if res:
             return res
         statement = insert(t).values(**kwargs)
-        res = await self.session.execute(statement)
+        res = await session.execute(statement)
         return self._FakeObj(res.inserted_primary_key[0])
 
-    async def insert_artifact(self, **kwargs):
-        session = self.maker()
+    async def insert_artifact(self, session, **kwargs):
         nested = await session.begin_nested()
         plugin = Artifact(
             name = kwargs["name"],
@@ -61,8 +59,7 @@ class Database:
             await session.commit()
             return await self.get_plugin_by_id(plugin.id)
     
-    async def insert_version(self, artifact_id, **kwargs):
-        session = self.maker()
+    async def insert_version(self, session:Session, artifact_id, **kwargs):
         version = Version(
             artifact_id=artifact_id,
             name=kwargs["name"],
@@ -74,8 +71,7 @@ class Database:
             await session.commit()
         return version
 
-    async def search(self, name=None, tags=None, limit=50, page=0):
-        session = self.maker()
+    async def search(self, session:Session, name=None, tags=None, limit=50, page=0):
         statement = select(Artifact).options(*Artifact._query_options).offset(limit * page)
         if name:
             name_select = select(Artifact).where(Artifact.name.like(f"%{name}%")).options(*Artifact._query_options)
@@ -89,24 +85,21 @@ class Database:
         result = (await session.execute(statement)).scalars().all()
         return result or []
 
-    async def get_plugin_by_name(self, name):
-        session = self.maker()
+    async def get_plugin_by_name(self, session:Session, name):
         statement = select(Artifact).options(*Artifact._query_options).where(Artifact.name == name)
         try:
             return (await session.execute(statement)).scalars().first()
         except NoResultFound:
             return None
     
-    async def get_plugin_by_id(self, id):
-        session = self.maker()
+    async def get_plugin_by_id(self, session:Session, id):
         statement = select(Artifact).options(*Artifact._query_options).where(Artifact.id == id)
         try:
             return (await session.execute(statement)).scalars().first()
         except NoResultFound:
             return None
     
-    async def delete_plugin(self, id):
-        session = self.maker()
+    async def delete_plugin(self, session:Session, id):
         await session.execute(delete(PluginTag).where(PluginTag.c.artifact_id == id))
         await session.execute(delete(Version).where(Version.artifact_id == id))
         await session.execute(delete(Artifact).where(Artifact.id == id))
