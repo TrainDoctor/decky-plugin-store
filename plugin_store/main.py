@@ -80,7 +80,7 @@ class PluginStore:
             plugins = await self.database.search(session, query, tags)
             return json_response([i.to_dict() for i in plugins])
         except:
-            session.rollback()
+            await session.rollback()
             raise
         finally:
             await session.close()
@@ -100,7 +100,7 @@ class PluginStore:
             await self.database.delete_plugin(session, id)
             return Response(status=204, text="Deleted")
         except:
-            session.rollback()
+            await session.rollback()
             raise
         finally:
             await session.close()
@@ -133,7 +133,7 @@ class PluginStore:
             new_plugin = await self.database.get_plugin_by_id(session, res.id)
             return json_response(new_plugin.to_dict(), status=200)
         except:
-            session.rollback()
+            await session.rollback()
             raise
         finally:
             await session.close()
@@ -161,7 +161,7 @@ class PluginStore:
         try:
             res = await self.database.get_plugin_by_name(session1, name)
         except:
-            session1.rollback()
+            await session1.rollback()
             raise
         finally:
             await session1.close()
@@ -172,7 +172,7 @@ class PluginStore:
                 await self.database.delete_plugin(session2, res.id)
                 res = None
         except:
-            session2.rollback()
+            await session2.rollback()
             raise
         finally:
             await session2.close()
@@ -190,19 +190,21 @@ class PluginStore:
             elif version_name in [i.name for i in res.versions]:
                 return json_response({"message": "Version already exists"}, status=400)
         except:
-            session3.rollback()
+            await session3.rollback()
             raise
         finally:
             await session3.close()
         
         session4 = self.database.maker()
         try:
-            ver = await self.database.insert_version(res.id,
+            ver = await self.database.insert_version(
+                session4,
+                res.id,
                 name=version_name,
                 hash=sha256(file_bin).hexdigest()
             )
         except:
-            session4.rollback()
+            await session4.rollback()
             raise
         finally:
             await session4.close()
