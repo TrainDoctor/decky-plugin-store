@@ -10,6 +10,8 @@ services:
         - B2_APP_KEY_ID
         - B2_APP_KEY
         - B2_BUCKET_ID
+    ports:
+        - "5566:5566"
     volumes:
         - ~/database:/db
     networks:

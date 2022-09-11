@@ -75,13 +75,15 @@ class PluginStore:
         tags = request.query.get("tags")
         if tags:
             tags = [i.strip() for i in tags.split(",")]
-        with self.database.maker() as session:
-            try:
-                plugins = await self.database.search(session, query, tags)
-                return json_response([i.to_dict() for i in plugins])
-            except:
-                session.rollback()
-                raise
+        session = self.database.maker()
+        try:
+            plugins = await self.database.search(session, query, tags)
+            return json_response([i.to_dict() for i in plugins])
+        except:
+            session.rollback()
+            raise
+        finally:
+            await session.close()
 
     async def check_auth(self, request):
         if request.headers.get("Authorization") != getenv("SUBMIT_AUTH_KEY"):
@@ -93,13 +95,15 @@ class PluginStore:
             return Response(status=403, text="INVALID AUTH KEY")
         data = await request.json()
         id = data["id"]
-        with self.database.maker() as session:
-            try:
-                await self.database.delete_plugin(session, id)
-                return Response(status=204, text="Deleted")
-            except:
-                session.rollback()
-                raise
+        session = self.database.maker()
+        try:
+            await self.database.delete_plugin(session, id)
+            return Response(status=204, text="Deleted")
+        except:
+            session.rollback()
+            raise
+        finally:
+            await session.close()
 
     async def update_plugin(self, request):
         if request.headers.get("Authorization") != getenv("SUBMIT_AUTH_KEY"):
@@ -112,26 +116,28 @@ class PluginStore:
         tags = data["tags"]
         versions = data["versions"]
         session = self.database.maker()
-        with self.database.maker() as session:
-            try:
-                await self.database.delete_plugin(session, plugin_id)
-                res = await self.database.insert_artifact(
-                    id=plugin_id,
-                    name=name,
-                    author=author,
-                    description=description,
-                    tags=tags
+        try:
+            await self.database.delete_plugin(session, plugin_id)
+            res = await self.database.insert_artifact(
+                id=plugin_id,
+                name=name,
+                author=author,
+                description=description,
+                tags=tags
+            )
+            for version in reversed(versions):
+                await self.database.insert_version(session, res.id,
+                    name=version["name"],
+                    hash=version["hash"]
                 )
-                for version in reversed(versions):
-                    await self.database.insert_version(session, res.id,
-                        name=version["name"],
-                        hash=version["hash"]
-                    )
-                new_plugin = await self.database.get_plugin_by_id(session, res.id)
-                return json_response(new_plugin.to_dict(), status=200)
-            except:
-                session.rollback()
-                raise
+            new_plugin = await self.database.get_plugin_by_id(session, res.id)
+            return json_response(new_plugin.to_dict(), status=200)
+        except:
+            session.rollback()
+            raise
+        finally:
+            await session.close()
+
 
     async def submit_plugin(self, request):
         if request.headers.get("Authorization") != getenv("SUBMIT_AUTH_KEY"):
@@ -151,48 +157,55 @@ class PluginStore:
         if "force" in data and data["force"]:
             force = data["force"].strip().title() in ["True", "1"]
 
-        with self.database.maker() as session:
-            try:
-                res = await self.database.get_plugin_by_name(session, name)
-            except:
-                session.rollback()
-                raise
+        session1 = self.database.maker()
+        try:
+            res = await self.database.get_plugin_by_name(session1, name)
+        except:
+            session1.rollback()
+            raise
+        finally:
+            await session1.close()
 
-        with self.database.maker() as session:
-            try:
-                if res and force:
-                    await self.database.delete_plugin(session, res.id)
-                    res = None
-            except:
-                session.rollback()
-                raise
+        session2 = self.database.maker()
+        try:
+            if res and force:
+                await self.database.delete_plugin(session2, res.id)
+                res = None
+        except:
+            session2.rollback()
+            raise
+        finally:
+            await session2.close()
 
-        with self.database.maker() as session:
-            try:
-                if not res:
-                    res = await self.database.insert_artifact(
-                        session=session,
-                        name=name,
-                        author=author,
-                        description=description,
-                        tags=tags
-                    )
-                elif version_name in [i.name for i in res.versions]:
-                    return json_response({"message": "Version already exists"}, status=400)
-            except:
-                session.rollback()
-                raise
-        
-        with self.database.maker() as session:
-            try:
-                ver = await self.database.insert_version(res.id,
-                    name=version_name,
-                    hash=sha256(file_bin).hexdigest()
+        session3 = self.database.maker()
+        try:
+            if not res:
+                res = await self.database.insert_artifact(
+                    session=session3,
+                    name=name,
+                    author=author,
+                    description=description,
+                    tags=tags
                 )
-            except:
-                session.rollback()
-                raise
+            elif version_name in [i.name for i in res.versions]:
+                return json_response({"message": "Version already exists"}, status=400)
+        except:
+            session3.rollback()
+            raise
+        finally:
+            await session3.close()
         
+        session4 = self.database.maker()
+        try:
+            ver = await self.database.insert_version(res.id,
+                name=version_name,
+                hash=sha256(file_bin).hexdigest()
+            )
+        except:
+            session4.rollback()
+            raise
+        finally:
+            await session4.close()
         await b2_upload(f"versions/{ver.hash}.zip", file_bin)
         await self.upload_image(res, image_url)
         await self.post_announcement(res)
