@@ -15,11 +15,12 @@ class Database:
         self.db_path = db_path
         self.engine = create_async_engine("sqlite+aiosqlite:///{}".format(self.db_path))
         self.lock = Lock()
+        self.maker = sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
     
     async def init(self):
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-            self.session = sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)()
+            self.session = self.maker()
 
     class _FakeObj:
         def __init__(self, id):
